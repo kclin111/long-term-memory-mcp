@@ -136,6 +136,7 @@ python -m ltm_memory entity-timeline user
 python -m ltm_memory search-events --query SQLite
 python -m ltm_memory status
 python -m ltm_memory benchmark
+python -m ltm_memory benchmark-episodic
 ```
 
 After package installation, the console scripts are available too:
@@ -176,7 +177,18 @@ Use `LTM_SQLITE_JOURNAL_MODE=MEMORY` only for constrained sandboxes that cannot 
 
 ## MCP Server
 
-For package installs, use the console script:
+There are two MCP entrypoints:
+
+- `ltm-memory-mcp`: agent-facing, small tool surface for normal LLM clients.
+- `ltm-memory-admin-mcp`: admin/host-facing, full maintenance and ingestion surface.
+
+Automatic memory ingestion should be a host/client behavior, not an LLM choice.
+The MCP server cannot see conversation turns by itself; your host should call
+`ingest_observation` after each user/assistant turn, or use the CLI/admin MCP
+server from a trusted automation layer. The default agent-facing server does
+not expose `ingest_observation`.
+
+For package installs, expose the agent-facing server to the LLM:
 
 ```json
 {
@@ -216,21 +228,26 @@ For development from this checkout:
 
 Tools exposed:
 
-- `ingest_observation`
 - `recall`
+- `get_entity_timeline`
+- `forget` (soft-forget only)
+
+Admin tools exposed by `ltm-memory-admin-mcp`:
+
+- `ingest_observation`
 - `process_background_jobs`
 - `memory_status`
-- `forget`
 - `search_events`
 - `rebuild_index`
-- `get_entity_timeline`
 - `merge_entities`
 - `consolidate_memory`
 - `get_open_questions`
 - `get_conflicts`
 - `flush_session_buffer`
+- `forget` (soft/hard)
 
-Example config lives at `docs/mcp-client-config.example.json`.
+Agent config lives at `docs/mcp-client-config.example.json`.
+Trusted admin config lives at `docs/mcp-admin-config.example.json`.
 
 ## Operator / LLM Provider
 
@@ -267,8 +284,45 @@ python -m ltm_memory benchmark
 python -m ltm_memory benchmark --scenario-file benchmarks/synthetic/m2_baseline.json
 ```
 
+The stricter GSW-style synthetic suite adds forward-falling questions,
+role/state/action separation, anchor coupling, and narrative reuse:
+
+```powershell
+python -m ltm_memory benchmark-episodic
+python -m ltm_memory benchmark-episodic --scenario-file benchmarks/synthetic/episodic_hard.json
+```
+
 The harness reports per-scenario `event_recall_f1`,
 `evidence_coverage`, `hallucination_rate`, and pass/fail counts.
+
+## LoCoMo Benchmark
+
+LoCoMo is the best first external benchmark for this project because it
+contains long multi-session conversations, QA annotations, event
+summaries, timestamps, and dialog-id evidence. Download the official
+`locomo10.json` from `snap-research/locomo`, then run the local retrieval
+gate:
+
+```powershell
+python -m ltm_memory benchmark-locomo --dataset data\locomo10.json --sample-limit 1
+python -m ltm_memory benchmark-locomo --dataset data\locomo10.json --sample-limit 10 --recall-limit 15
+```
+
+This harness is intentionally zero-cost: it does not call OpenRouter or
+any LLM judge. It measures whether `recall` retrieves the annotated
+dialog evidence and answer-bearing text:
+
+- `evidence_recall_at_k`
+- `any_evidence_hit_rate`
+- `answer_string_hit_rate`
+- per-category breakdown for LoCoMo categories 1-4
+
+Use `benchmark-episodic` for GSW-style mechanism regression, and
+`benchmark-locomo` for MemoryOS-style long multi-session retrieval. A
+future explicit LLM-as-judge mode can be added when you want to spend API
+credits on final answer quality.
+
+More details live in `docs/benchmarking.md`.
 
 ## Tests
 

@@ -44,6 +44,11 @@ DEFAULT_SCENARIO_FILE = resources.files("ltm_memory").joinpath(
     "synthetic",
     "m2_baseline.json",
 )
+EPISODIC_HARD_SCENARIO_FILE = resources.files("ltm_memory").joinpath(
+    "benchmarks",
+    "synthetic",
+    "episodic_hard.json",
+)
 
 BENCHMARK_TMP_ROOT = Path.cwd() / ".codex-tmp" / "benchmark-runs"
 
@@ -129,6 +134,12 @@ def run_benchmark(*, scenario_file: str | Path | None = None) -> dict[str, Any]:
     ]
 
     return _build_report(document, path, results)
+
+
+def run_episodic_benchmark(*, scenario_file: str | Path | None = None) -> dict[str, Any]:
+    """Run the stricter GSW-style episodic synthetic benchmark."""
+
+    return run_benchmark(scenario_file=scenario_file or EPISODIC_HARD_SCENARIO_FILE)
 
 
 def _run_scenario(scenario: dict) -> ScenarioResult:
@@ -485,6 +496,45 @@ def _check_entity_timeline(qresult: QueryResult, expectations: dict, scenario: S
         ok = bool(raw.get("narrative"))
         qresult.add_check(ok, "expected narrative to be present on the entity timeline")
 
+    role_types = expectations.get("role_types_must_include") or []
+    if role_types:
+        observed = {role.get("role_type") for role in raw.get("roles", []) or []}
+        for role_type in role_types:
+            ok = role_type in observed
+            qresult.add_check(ok, f"role_type {role_type!r} not on entity timeline")
+            if ok:
+                scenario.event_true_positives += 1
+            else:
+                scenario.event_false_negatives += 1
+
+    state_types = expectations.get("state_types_must_include") or []
+    if state_types:
+        observed = {state.get("state_type") for state in raw.get("states", []) or []}
+        for state_type in state_types:
+            ok = state_type in observed
+            qresult.add_check(ok, f"state_type {state_type!r} not on entity timeline")
+            if ok:
+                scenario.event_true_positives += 1
+            else:
+                scenario.event_false_negatives += 1
+
+    state_values = expectations.get("state_values_must_include") or []
+    if state_values:
+        observed_values = [state.get("value") or "" for state in raw.get("states", []) or []]
+        for value in state_values:
+            ok = any(value in observed for observed in observed_values)
+            qresult.add_check(ok, f"state value substring {value!r} not on entity timeline")
+            if ok:
+                scenario.event_true_positives += 1
+            else:
+                scenario.event_false_negatives += 1
+
+    min_conflicts = expectations.get("min_conflicts")
+    if isinstance(min_conflicts, int):
+        conflicts = raw.get("memory_conflicts", []) or []
+        ok = len(conflicts) >= min_conflicts
+        qresult.add_check(ok, f"expected >= {min_conflicts} conflicts, got {len(conflicts)}")
+
 
 def _check_forget_event(qresult: QueryResult, expectations: dict, scenario: ScenarioResult) -> None:
     raw = qresult.raw or {}
@@ -581,4 +631,11 @@ def _safe_mean(values: list[float]) -> float:
     return round(sum(values) / len(values), 4)
 
 
-__all__ = ["run_benchmark", "ScenarioResult", "QueryResult", "DEFAULT_SCENARIO_FILE"]
+__all__ = [
+    "run_benchmark",
+    "run_episodic_benchmark",
+    "ScenarioResult",
+    "QueryResult",
+    "DEFAULT_SCENARIO_FILE",
+    "EPISODIC_HARD_SCENARIO_FILE",
+]

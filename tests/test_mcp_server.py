@@ -31,7 +31,11 @@ class EnvPatch:
 
 
 class MCPServerTests(unittest.TestCase):
-    def test_mcp_tools_are_registered_and_callable(self) -> None:
+    def test_agent_server_exposes_small_llm_facing_surface(self) -> None:
+        result = asyncio.run(self._agent_tools())
+        self.assertEqual(result, {"recall", "get_entity_timeline", "forget"})
+
+    def test_admin_server_exposes_maintenance_surface_and_is_callable(self) -> None:
         TEST_TMP_ROOT.mkdir(parents=True, exist_ok=True)
         root = TEST_TMP_ROOT / uuid4().hex
         root.mkdir(parents=True, exist_ok=False)
@@ -42,14 +46,18 @@ class MCPServerTests(unittest.TestCase):
                 "LTM_SQLITE_JOURNAL_MODE": "MEMORY",
             }
         ):
-            result = asyncio.run(self._call_tools())
+            result = asyncio.run(self._call_admin_tools())
         self.assertEqual(result["ingest"]["status"], "queued")
         self.assertEqual(len(result["recall"]["observations"]), 1)
         self.assertEqual(result["jobs"]["failed"], 0)
         self.assertEqual(result["timeline"]["entity"]["canonical_name"], "user")
 
-    async def _call_tools(self) -> dict:
-        server = create_server()
+    async def _agent_tools(self) -> set[str]:
+        server = create_server("agent")
+        return {tool.name for tool in await server.list_tools()}
+
+    async def _call_admin_tools(self) -> dict:
+        server = create_server("admin")
         tools = {tool.name for tool in await server.list_tools()}
         self.assertIn("ingest_observation", tools)
         self.assertIn("recall", tools)
@@ -57,6 +65,8 @@ class MCPServerTests(unittest.TestCase):
         self.assertIn("get_entity_timeline", tools)
         self.assertIn("forget", tools)
         self.assertIn("search_events", tools)
+        self.assertIn("merge_entities", tools)
+        self.assertIn("consolidate_memory", tools)
 
         _, ingest = await server.call_tool(
             "ingest_observation",

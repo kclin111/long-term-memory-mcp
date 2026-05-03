@@ -1,0 +1,112 @@
+{
+  "name": "episodic_hard",
+  "description": "Stricter synthetic benchmark for GSW-style episodic memory. It stresses forward-falling questions, spatiotemporal anchor coupling, role/state separation, action typing, and MemoryOS-style narrative/segment reuse without requiring network or LLM calls.",
+  "scenarios": [
+    {
+      "name": "forward_falling_question_late_anchor",
+      "description": "The first observation names the actor and action but omits time/place; the second supplies the missing anchors. The open question should be answered through shared entity overlap.",
+      "session_id": "episodic-oq-anchor",
+      "observations": [
+        {
+          "client_dedup_key": "episodic-oq-1",
+          "source_type": "chat",
+          "content": "Remember important: Carter Stewart presented the statistics workshop."
+        },
+        {
+          "client_dedup_key": "episodic-oq-2",
+          "source_type": "chat",
+          "content": "Remember important: Carter Stewart presented at Metropolitan Museum on 2026-09-22."
+        }
+      ],
+      "queries": [
+        {
+          "type": "entity_timeline",
+          "entity_query": "Carter Stewart",
+          "expectations": {
+            "min_events": 2,
+            "anchor_labels_must_include": ["Metropolitan Museum", "2026-09-22"],
+            "open_questions_status_should_include_answered": true,
+            "answer_text_substring": "Metropolitan Museum",
+            "role_types_must_include": ["presenter"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "role_state_action_separation",
+      "description": "The same actor should hold a state while also gaining a presenter role and a present action in a later event.",
+      "session_id": "episodic-role-state",
+      "observations": [
+        {
+          "client_dedup_key": "role-state-1",
+          "source_type": "chat",
+          "content": "Remember important: Carter Stewart was nervous before the workshop."
+        },
+        {
+          "client_dedup_key": "role-state-2",
+          "source_type": "chat",
+          "content": "Remember important: Carter Stewart presented the workshop at Room Alpha on 2026-10-05."
+        }
+      ],
+      "queries": [
+        {
+          "type": "entity_timeline",
+          "entity_query": "Carter Stewart",
+          "expectations": {
+            "min_events": 2,
+            "role_types_must_include": ["presenter"],
+            "state_types_must_include": ["status"],
+            "state_values_must_include": ["nervous"],
+            "anchor_labels_must_include": ["Room Alpha", "2026-10-05"]
+          }
+        },
+        {
+          "type": "recall",
+          "query": "Carter Stewart presented workshop",
+          "session_id": "episodic-role-state",
+          "expectations": {
+            "min_events": 1,
+            "must_have_event_action_type": "present",
+            "min_evidence_coverage": 1.0
+          }
+        }
+      ]
+    },
+    {
+      "name": "entity_narrative_over_repeated_events",
+      "description": "Repeated events about the same entity should create enough structure for query-time narrative payloads and segment heat.",
+      "session_id": "episodic-narrative",
+      "observations": [
+        {
+          "client_dedup_key": "narrative-1",
+          "source_type": "chat",
+          "content": "Remember important: Carter Stewart presented the Operator design at Metropolitan Museum on 2026-09-22."
+        },
+        {
+          "client_dedup_key": "narrative-2",
+          "source_type": "chat",
+          "content": "Remember important: Carter Stewart explained Reconciler anchor propagation for the memory project."
+        },
+        {
+          "client_dedup_key": "narrative-3",
+          "source_type": "chat",
+          "content": "Remember important: Carter Stewart explained OpenQuestion resolution and EntityNarrative refresh."
+        }
+      ],
+      "queries": [
+        {
+          "type": "recall",
+          "query": "Carter Stewart Reconciler EntityNarrative",
+          "session_id": "episodic-narrative",
+          "expectations": {
+            "min_events": 2,
+            "min_entity_narratives": 1,
+            "narrative_content_substring": "Carter Stewart",
+            "min_segment_heat": 0.05,
+            "min_evidence_coverage": 1.0
+          }
+        }
+      ]
+    }
+  ]
+}

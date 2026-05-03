@@ -19,6 +19,7 @@ dev = ["pytest>=9.0.0"]
 [project.scripts]
 ltm-memory = "ltm_memory.cli:main"
 ltm-memory-mcp = "ltm_memory.mcp_server:main"
+ltm-memory-admin-mcp = "ltm_memory.mcp_server:admin_main"
 ltm-memory-smoke = "ltm_memory.install_smoke:main"
 
 [build-system]

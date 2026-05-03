@@ -44,17 +44,53 @@ ltm-memory ingest "User decided to use SQLite as canonical memory and LanceDB as
 ltm-memory process-jobs --max-jobs 5
 ltm-memory recall "SQLite LanceDB" --session-id demo
 ltm-memory search-events --query SQLite
+ltm-memory benchmark
+ltm-memory benchmark-episodic
+```
+
+For external benchmark setup, see `docs/benchmarking.md`. The first
+recommended dataset is LoCoMo:
+
+```powershell
+ltm-memory benchmark-locomo --dataset data\locomo10.json --sample-limit 1
 ```
 
 ## MCP Client Config
 
-After package installation, use the console script directly:
+After package installation, expose the small agent-facing server to the LLM:
 
 ```json
 {
   "mcpServers": {
     "long-term-memory": {
       "command": "ltm-memory-mcp",
+      "args": [],
+      "env": {
+        "LTM_HOME": ".ltm-data",
+        "LTM_LLM_PROVIDER": "openrouter",
+        "LTM_LLM_MODEL": "openai/gpt-4o-mini",
+        "OPENROUTER_API_KEY": "sk-or-v1-your-key-here",
+        "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1"
+      }
+    }
+  }
+}
+```
+
+This server exposes only `recall`, `get_entity_timeline`, and soft `forget`.
+
+Automatic memory ingestion is host-side. The MCP server cannot observe chat
+turns by itself, and `ingest_observation` is intentionally not exposed to the
+normal LLM tool list. Configure your host/client wrapper to call
+`ingest_observation` after each turn through the admin server or CLI.
+
+Trusted automation/admin config is in `docs/mcp-admin-config.example.json`:
+
+```json
+{
+  "mcpServers": {
+    "long-term-memory-admin": {
+      "command": "ltm-memory-admin-mcp",
       "args": [],
       "env": {
         "LTM_HOME": ".ltm-data",

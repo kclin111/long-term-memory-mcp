@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from ltm_memory.benchmark import DEFAULT_SCENARIO_FILE, run_benchmark
+from ltm_memory.benchmark import (
+    DEFAULT_SCENARIO_FILE,
+    EPISODIC_HARD_SCENARIO_FILE,
+    run_benchmark,
+    run_episodic_benchmark,
+)
 
 
 class BenchmarkHarnessTests(unittest.TestCase):
@@ -32,6 +37,20 @@ class BenchmarkHarnessTests(unittest.TestCase):
                 1.0,
                 msg=f"scenario {scenario['name']} lost evidence coverage",
             )
+
+    def test_episodic_hard_scenarios_all_pass(self) -> None:
+        self.assertTrue(
+            EPISODIC_HARD_SCENARIO_FILE.exists(),
+            f"bundled scenario file missing: {EPISODIC_HARD_SCENARIO_FILE}",
+        )
+        report = run_episodic_benchmark()
+        self.assertEqual(report["benchmark"], "episodic_hard")
+        self.assertGreater(report["summary"]["scenario_count"], 0)
+        self.assertEqual(
+            report["summary"]["expectations_failed"],
+            0,
+            msg=f"episodic regressions: {[s for s in report['scenarios'] if s['expectations_failed']]}",
+        )
 
 
 if __name__ == "__main__":

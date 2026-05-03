@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
 from .store import MemoryStore
 from .worker import JobWorker
+
+
+ServerMode = Literal["agent", "admin"]
 
 
 def _with_store(fn):
@@ -16,39 +19,37 @@ def _with_store(fn):
         store.close()
 
 
-def create_server() -> FastMCP:
+def create_server(mode: ServerMode = "agent") -> FastMCP:
+    """Create an MCP server.
+
+    ``agent`` is the default LLM-facing surface. It intentionally keeps the
+    action space small and excludes ingestion/maintenance tools. Automatic
+    memory writes should be triggered by the MCP host/client outside model
+    tool selection.
+
+    ``admin`` exposes the full developer/maintenance surface, including
+    ingestion, background jobs, entity merge, and index management.
+    """
+
+    if mode not in {"agent", "admin"}:
+        raise ValueError(f"unknown MCP server mode: {mode}")
+
     mcp = FastMCP(
-        "long-term-memory",
+        "long-term-memory" if mode == "agent" else "long-term-memory-admin",
         instructions=(
             "Local-first event-centric long-term memory server. "
-            "SQLite is canonical; LanceDB is an optional retrieval index."
+            "SQLite is canonical; LanceDB is an optional retrieval index. "
+            f"Mode: {mode}."
         ),
     )
 
-    @mcp.tool()
-    def ingest_observation(
-        content: str,
-        source_type: str = "chat",
-        session_id: str | None = None,
-        source_uri: str | None = None,
-        client_dedup_key: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        role: str = "user",
-    ) -> dict[str, Any]:
-        """Store an observation and queue background extraction when it is important."""
+    _register_agent_tools(mcp, include_soft_forget=(mode == "agent"))
+    if mode == "admin":
+        _register_admin_tools(mcp)
+    return mcp
 
-        return _with_store(
-            lambda store: store.ingest_observation(
-                source_type=source_type,
-                content=content,
-                session_id=session_id,
-                source_uri=source_uri,
-                client_dedup_key=client_dedup_key,
-                metadata=metadata,
-                role=role,
-            )
-        )
 
+def _register_agent_tools(mcp: FastMCP, *, include_soft_forget: bool) -> None:
     @mcp.tool()
     def recall(
         query: str,
@@ -59,7 +60,7 @@ def create_server() -> FastMCP:
         include_session_buffer: bool = True,
         max_response_tokens: int | None = None,
     ) -> dict[str, Any]:
-        """Recall observations, events, actions, anchors, and open questions."""
+        """Recall observations, events, narratives, memories, and relevant conflicts."""
 
         return _with_store(
             lambda store: store.recall(
@@ -82,7 +83,7 @@ def create_server() -> FastMCP:
         state_types: list[str] | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
-        """Return events, roles, states, anchors, and questions for one entity."""
+        """Return events, roles, states, anchors, narrative, memories, and conflicts for one entity."""
 
         return _with_store(
             lambda store: store.get_entity_timeline(
@@ -95,24 +96,73 @@ def create_server() -> FastMCP:
             )
         )
 
-    @mcp.tool()
-    def merge_entities(
-        source_id: str,
-        target_id: str,
-        notes: str | None = None,
-    ) -> dict[str, Any]:
-        """Merge ``source_id`` into ``target_id`` and rewrite all references.
+    if include_soft_forget:
+        @mcp.tool()
+        def forget(
+            target_type: str,
+            target_id: str,
+            cascade: bool = True,
+        ) -> dict[str, Any]:
+            """Soft-forget a memory record after the user explicitly asks to forget it."""
 
-        Both entities must share the same ``entity_type``. Source aliases and
-        the source canonical name are preserved on the target so that future
-        entity resolution can match either name.
-        """
+            return _with_store(
+                lambda store: store.forget(
+                    target_type=target_type,
+                    target_id=target_id,
+                    mode="soft",
+                    cascade=cascade,
+                )
+            )
+
+
+def _register_admin_tools(mcp: FastMCP) -> None:
+    @mcp.tool()
+    def ingest_observation(
+        content: str,
+        source_type: str = "chat",
+        session_id: str | None = None,
+        source_uri: str | None = None,
+        client_dedup_key: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        role: str = "user",
+    ) -> dict[str, Any]:
+        """Host-side automatic ingestion endpoint. Prefer client hooks over LLM tool selection."""
 
         return _with_store(
-            lambda store: store.merge_entities(
-                source_id=source_id,
-                target_id=target_id,
-                notes=notes,
+            lambda store: store.ingest_observation(
+                source_type=source_type,
+                content=content,
+                session_id=session_id,
+                source_uri=source_uri,
+                client_dedup_key=client_dedup_key,
+                metadata=metadata,
+                role=role,
+            )
+        )
+
+    @mcp.tool()
+    def search_events(
+        query: str | None = None,
+        entity_id: str | None = None,
+        event_type: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        min_importance: float | None = None,
+        include_forgotten: bool = False,
+        limit: int = 25,
+    ) -> list[dict[str, Any]]:
+        """Search extracted events using text, entity, type, time, and importance filters."""
+
+        return _with_store(
+            lambda store: store.search_events(
+                query=query,
+                entity_id=entity_id,
+                event_type=event_type,
+                since=since,
+                until=until,
+                min_importance=min_importance,
+                include_forgotten=include_forgotten,
+                limit=limit,
             )
         )
 
@@ -147,36 +197,26 @@ def create_server() -> FastMCP:
         )
 
     @mcp.tool()
-    def search_events(
-        query: str | None = None,
-        entity_id: str | None = None,
-        event_type: str | None = None,
-        since: str | None = None,
-        until: str | None = None,
-        min_importance: float | None = None,
-        include_forgotten: bool = False,
-        limit: int = 25,
-    ) -> list[dict[str, Any]]:
-        """Search extracted events using text, entity, type, time, and importance filters."""
-
-        return _with_store(
-            lambda store: store.search_events(
-                query=query,
-                entity_id=entity_id,
-                event_type=event_type,
-                since=since,
-                until=until,
-                min_importance=min_importance,
-                include_forgotten=include_forgotten,
-                limit=limit,
-            )
-        )
-
-    @mcp.tool()
     def rebuild_index() -> dict[str, Any]:
         """Rebuild the optional LanceDB index from canonical SQLite records."""
 
         return _with_store(lambda store: JobWorker(store).rebuild_index())
+
+    @mcp.tool()
+    def merge_entities(
+        source_id: str,
+        target_id: str,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        """Merge ``source_id`` into ``target_id`` and rewrite all references."""
+
+        return _with_store(
+            lambda store: store.merge_entities(
+                source_id=source_id,
+                target_id=target_id,
+                notes=notes,
+            )
+        )
 
     @mcp.tool()
     def consolidate_memory(
@@ -185,9 +225,7 @@ def create_server() -> FastMCP:
         entity_id: str | None = None,
         segment_id: str | None = None,
     ) -> dict[str, Any]:
-        """Run MemoryOS-style consolidation tasks (heat update, persistent
-        memory promotion, narrative refresh, open question resolution,
-        narrative archival)."""
+        """Run MemoryOS-style consolidation tasks."""
 
         return _with_store(
             lambda store: store.consolidate_memory(
@@ -240,11 +278,13 @@ def create_server() -> FastMCP:
 
         return _with_store(lambda store: store.flush_session_buffer(session_id))
 
-    return mcp
-
 
 def main() -> None:
-    create_server().run("stdio")
+    create_server("agent").run("stdio")
+
+
+def admin_main() -> None:
+    create_server("admin").run("stdio")
 
 
 if __name__ == "__main__":

@@ -62,6 +62,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a benchmark scenario JSON. Defaults to the bundled M2 baseline.",
     )
 
+    episodic = sub.add_parser(
+        "benchmark-episodic",
+        help="Run the stricter GSW-style episodic synthetic benchmark.",
+    )
+    episodic.add_argument(
+        "--scenario-file",
+        help="Path to a benchmark scenario JSON. Defaults to the bundled episodic hard set.",
+    )
+
+    locomo = sub.add_parser(
+        "benchmark-locomo",
+        help="Run a LoCoMo-style retrieval/evidence benchmark against a local dataset JSON.",
+    )
+    locomo.add_argument("--dataset", required=True, help="Path to locomo10.json or a compatible sample JSON.")
+    locomo.add_argument("--sample-limit", type=int)
+    locomo.add_argument("--max-questions", type=int)
+    locomo.add_argument("--categories", nargs="*", default=["1", "2", "3", "4"])
+    locomo.add_argument(
+        "--source-mode",
+        default="dialogs",
+        help="dialogs, observations, session_summaries, or a + combination such as dialogs+observations.",
+    )
+    locomo.add_argument("--recall-limit", type=int, default=10)
+    locomo.add_argument("--max-jobs", type=int, default=1000)
+
     consolidate = sub.add_parser("consolidate", help="Run MemoryOS consolidation tasks.")
     consolidate.add_argument(
         "--tasks",
@@ -112,6 +137,26 @@ def main(argv: list[str] | None = None) -> int:
         from .benchmark import run_benchmark
 
         _print_json(run_benchmark(scenario_file=args.scenario_file))
+        return 0
+    if args.command == "benchmark-episodic":
+        from .benchmark import run_episodic_benchmark
+
+        _print_json(run_episodic_benchmark(scenario_file=args.scenario_file))
+        return 0
+    if args.command == "benchmark-locomo":
+        from .benchmark_locomo import run_locomo_benchmark
+
+        _print_json(
+            run_locomo_benchmark(
+                dataset_file=args.dataset,
+                sample_limit=args.sample_limit,
+                max_questions=args.max_questions,
+                categories=args.categories,
+                source_mode=args.source_mode,
+                recall_limit=args.recall_limit,
+                max_jobs=args.max_jobs,
+            )
+        )
         return 0
 
     settings = Settings.from_env()
