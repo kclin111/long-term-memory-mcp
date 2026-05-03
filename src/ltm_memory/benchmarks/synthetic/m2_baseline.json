@@ -1,0 +1,216 @@
+{
+  "name": "m2_baseline",
+  "description": "Reproducible synthetic benchmark for the M2 episodic core (PRD §14.3). Each scenario seeds a fresh store with a small number of observations, then exercises recall and entity-timeline expectations covering anchor coupling, anchor propagation through a shared entity, and forward-falling open question resolution.",
+  "scenarios": [
+    {
+      "name": "decision_recall_with_evidence",
+      "description": "A single high-importance decision should be recalled by lexical query, with evidence linked back to the originating observation.",
+      "session_id": "bench-decision",
+      "observations": [
+        {
+          "client_dedup_key": "decision-1",
+          "source_type": "chat",
+          "content": "User decided to implement MCP memory with Python, SQLite FTS5, and LanceDB."
+        }
+      ],
+      "queries": [
+        {
+          "type": "recall",
+          "query": "Python SQLite LanceDB",
+          "session_id": "bench-decision",
+          "expectations": {
+            "min_events": 1,
+            "must_have_event_summary_substring": "SQLite",
+            "must_have_event_action_type": "decide",
+            "min_evidence_coverage": 1.0
+          }
+        }
+      ]
+    },
+    {
+      "name": "anchor_coupling_within_observation",
+      "description": "When an observation explicitly mentions both a person and a date+venue, the event should be coupled to both anchors and the person should inherit them via entity_anchors.",
+      "session_id": "bench-anchor-coupling",
+      "observations": [
+        {
+          "client_dedup_key": "anchor-coupling-1",
+          "source_type": "chat",
+          "content": "Remember important: Carter Stewart presented at Metropolitan Museum on 2026-09-22."
+        }
+      ],
+      "queries": [
+        {
+          "type": "entity_timeline",
+          "entity_query": "Carter Stewart",
+          "expectations": {
+            "anchor_labels_must_include": ["2026-09-22", "Metropolitan Museum"],
+            "min_events": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "anchor_propagation_through_shared_entity",
+      "description": "Anchors attached to one observation must propagate to a later observation that shares an entity but does not restate the anchor.",
+      "session_id": "bench-anchor-propagation",
+      "observations": [
+        {
+          "client_dedup_key": "anchor-prop-1",
+          "source_type": "chat",
+          "content": "Remember important: The MCP workshop happened on 2026-09-22 at Metropolitan Museum."
+        },
+        {
+          "client_dedup_key": "anchor-prop-2",
+          "source_type": "chat",
+          "content": "Remember important: Carter Stewart presented the MCP workshop."
+        }
+      ],
+      "queries": [
+        {
+          "type": "entity_timeline",
+          "entity_query": "Carter Stewart",
+          "expectations": {
+            "anchor_labels_must_include": ["2026-09-22", "Metropolitan Museum"],
+            "min_events": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "forward_falling_open_question_resolution",
+      "description": "An early observation creates an open 'when' question for a presenter; a later observation that supplies the date+venue should mark the question answered with the new anchor evidence.",
+      "session_id": "bench-open-questions",
+      "observations": [
+        {
+          "client_dedup_key": "oq-1",
+          "source_type": "chat",
+          "content": "Remember important: Carter Stewart presented the statistics workshop."
+        },
+        {
+          "client_dedup_key": "oq-2",
+          "source_type": "chat",
+          "content": "Remember important: Carter Stewart presented at Metropolitan Museum on 2026-09-22."
+        }
+      ],
+      "queries": [
+        {
+          "type": "entity_timeline",
+          "entity_query": "Carter Stewart",
+          "expectations": {
+            "open_questions_status_should_include_answered": true,
+            "answer_text_substring": "Metropolitan Museum"
+          }
+        }
+      ]
+    },
+    {
+      "name": "preference_recall_across_decision_and_preference_events",
+      "description": "Two related observations should produce two events; recall by topic should surface both with non-zero importance.",
+      "session_id": "bench-preferences",
+      "observations": [
+        {
+          "client_dedup_key": "pref-1",
+          "source_type": "chat",
+          "content": "User decided to use Python for the long-term memory MCP server."
+        },
+        {
+          "client_dedup_key": "pref-2",
+          "source_type": "chat",
+          "content": "User prefers SQLite + LanceDB local-first storage for the memory project."
+        }
+      ],
+      "queries": [
+        {
+          "type": "recall",
+          "query": "Python SQLite LanceDB",
+          "session_id": "bench-preferences",
+          "expectations": {
+            "min_events": 2,
+            "min_evidence_coverage": 1.0,
+            "min_entity_narratives": 1,
+            "narrative_content_substring": "Python"
+          }
+        }
+      ]
+    },
+    {
+      "name": "segment_heat_and_narrative_cache",
+      "description": "Repeated mentions of the same primary entity should join the same MemorySegment and produce a non-trivial segment heat. The recall path should attach a query-specific entity narrative.",
+      "session_id": "bench-m3-segments",
+      "observations": [
+        {
+          "client_dedup_key": "m3-1",
+          "source_type": "chat",
+          "content": "Remember important: Carter Stewart presented the M3 lifecycle workshop at Metropolitan Museum on 2026-09-22."
+        },
+        {
+          "client_dedup_key": "m3-2",
+          "source_type": "chat",
+          "content": "Remember important: Carter Stewart explained MemoryOS heat and PersistentMemory promotion."
+        },
+        {
+          "client_dedup_key": "m3-3",
+          "source_type": "chat",
+          "content": "Remember important: Carter Stewart followed up with a Q&A on entity narratives."
+        }
+      ],
+      "queries": [
+        {
+          "type": "recall",
+          "query": "Carter Stewart MemoryOS",
+          "session_id": "bench-m3-segments",
+          "expectations": {
+            "min_events": 1,
+            "min_entity_narratives": 1,
+            "narrative_content_substring": "Carter Stewart",
+            "min_evidence_coverage": 1.0,
+            "min_segment_heat": 0.05
+          }
+        },
+        {
+          "type": "entity_timeline",
+          "entity_query": "Carter Stewart",
+          "expectations": {
+            "min_events": 2,
+            "narrative_must_be_present": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "forget_event_cascade",
+      "description": "Forgetting one supporting event should stale entity narratives, reduce the supporting persistent memory reinforcement count, and hide the forgotten event from default search.",
+      "session_id": "bench-forget",
+      "observations": [
+        {
+          "client_dedup_key": "forget-1",
+          "source_type": "chat",
+          "content": "User decided important: SQLite remains canonical for the long-term memory server."
+        },
+        {
+          "client_dedup_key": "forget-2",
+          "source_type": "chat",
+          "content": "User decided important: LanceDB remains a rebuildable retrieval index."
+        }
+      ],
+      "queries": [
+        {
+          "type": "forget_event",
+          "event_summary_substring": "SQLite remains canonical",
+          "supporting_event_summary_substrings": [
+            "SQLite remains canonical",
+            "LanceDB remains a rebuildable retrieval index"
+          ],
+          "mode": "soft",
+          "cascade": true,
+          "expectations": {
+            "narratives_should_be_stale": true,
+            "max_reinforcement_count_after_forget": 1,
+            "persistent_memory_status": "active",
+            "forgotten_event_hidden_from_search": true
+          }
+        }
+      ]
+    }
+  ]
+}
